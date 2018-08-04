@@ -14,46 +14,42 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # pylint: disable=c0111,c0301,c0325, r0903,w0406
-from charmhelpers.core import hookenv
-from charms.reactive import hook
-from charms.reactive import RelationBase
-from charms.reactive import scopes
+from charms.reactive import Endpoint, when_any, set_flag, clear_flag, when_not
 
-class ArangoDBRequires(RelationBase):
-    scope = scopes.UNIT
-    auto_accessors = ['host', 'port', 'username', 'password']
 
-    @hook('{requires:arangodb}-relation-joined')
+class ArangoDBRequires(Endpoint):
+
+    @when_any('endpoint.{endpoint_name}.joined')
     def joined(self):
-        conv = self.conversation()
-        conv.remove_state('{relation_name}.broken')
-        conv.set_state('{relation_name}.connected')
+        if any(unit.received.get('port') for unit in self.all_joined_units):
+            set_flag(self.expand_name('endpoint.{endpoint_name}.available'))
+        else:
+            clear_flag(self.expand_name('endpoint.{endpoint_name}.available'))
 
-    @hook('{requires:arangodb}-relation-changed')
+    @when_any('endpoint.{endpoint_name}.changed',
+              'endpoint.{endpoint_name}.departed')
     def changed(self):
-        conv = self.conversation()
-        conv.remove_state('{relation_name}.departed')
-        if conv.get_remote('port'):
-            conv.set_state('{relation_name}.available')
+        set_flag(self.expand_name('endpoint.{endpoint_name}.update'))
+        clear_flag(self.expand_name('endpoint.{endpoint_name}.departed'))
+        clear_flag(self.expand_name('endpoint.{endpoint_name}.changed'))
 
-    @hook('{requires:arangodb}-relation-departed')
-    def departed(self):
-        conv = self.conversation()
-        conv.remove_state('{relation_name}.available')
-        conv.set_state('{relation_name}.departed')
-
-    @hook('{requires:arangodb}-relation-broken')
+    @when_not('endpoint.{endpoint_name}.joined')
     def broken(self):
-        conv = self.conversation()
-        conv.remove_state('{relation_name}.connected')
-        conv.set_state('{relation_name}.broken')
+        clear_flag(self.expand_name('endpoint.{endpoint_name}.available'))
 
     def relation_data(self):
         data = []
-        for conv in self.conversations():
-            data.append({'host': conv.get_remote('host'),
-                         'port' : conv.get_remote('port'),
-                         'username': conv.get_remote('username'),
-                         'password' : conv.get_remote('password')})
-        return(data)
-
+        for unit in self.all_joined_units:
+            port = unit.received.get('port')
+            host = unit.received.get('host')
+            username = unit.received.get('username')
+            password = unit.received.get('password')
+            if port and host and username:
+                data.append({
+                    'host': host,
+                    'port': port,
+                    'username': username,
+                    'password': password,
+                    'remote_unit_name': unit.unit_name
+                })
+        return data
